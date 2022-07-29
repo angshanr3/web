@@ -1,0 +1,811 @@
+import './Tables.css';//CSS
+import React, { useState,useEffect } from 'react';
+import "bootstrap/dist/css/bootstrap.css";
+import { Form } from "react-bootstrap";
+import { DatePicker,TimePicker} from 'antd';
+import { Link } from "react-router-dom";
+
+import moment from 'moment';
+import axios from 'axios';
+import * as XLSX from 'xlsx';
+import InputFiles from "react-input-files";
+
+//路徑
+import Logo from './logo/run_data.gif';
+
+/*輔助決策表格的css*/
+var atStyle = {
+
+    border: '1px solid white',
+    background:'#F5C9CA',
+};
+
+//匯出Excel 
+function download(json,fileName){
+    const type = 'xlsx'//定義匯出檔案的格式
+    var tmpDown;//匯出的內容
+    var tmpdata = json[0];
+    json.unshift({});
+    var keyMap = []; //獲取keys
+    for (var k in tmpdata) {
+        keyMap.push(k);
+        json[0][k] = k;
+    }
+    tmpdata = [];//用來儲存轉換好的json 
+    
+    json.map((v, i) => keyMap.map((k, j) => Object.assign({}, {
+        v: v[k],
+        position: (j > 25 ? getCharCol(j) : String.fromCharCode(65 + j)) + (i + 1)
+    }))).reduce((prev, next) => prev.concat(next)).forEach((v, i) => tmpdata[v.position] = {
+        v: v.v
+    });
+    var outputPos = Object.keys(tmpdata); //設定區域,比如表格從A1到D10
+    var tmpWB = {
+        SheetNames: ['SpecList'], //儲存的表標題
+        Sheets: {
+            'SpecList': Object.assign({},
+                tmpdata, //內容
+                {
+                    '!ref': outputPos[0] + ':' + outputPos[outputPos.length - 1] //設定填充區域
+                })
+        }
+    };
+    tmpDown = new Blob([s2ab(XLSX.write(tmpWB, 
+        {bookType: (type === undefined ? 'xlsx':type),bookSST: false, type: 'binary'}//這裡的資料是用來定義匯出的格式型別
+        ))], {
+        type: ""
+    }); //建立二進位制物件寫入轉換好的位元組流
+    saveAs(tmpDown,fileName);
+}
+
+function saveAs(obj, fileName){//匯出功能實現
+    var tmpa = document.createElement("a");
+    tmpa.download = fileName || "下載";
+    tmpa.href = URL.createObjectURL(obj); //繫結a標籤
+    tmpa.click(); //模擬點選實現下載
+    setTimeout(function () { //延時釋放
+        URL.revokeObjectURL(obj); //用URL.revokeObjectURL()來釋放這個object URL
+    }, 100);
+}
+
+function s2ab(s){ //字串轉字元流
+    var buf = new ArrayBuffer(s.length);
+    var view = new Uint8Array(buf);
+    for (var i = 0; i !== s.length; ++i) view[i] = s.charCodeAt(i) & 0xFF;
+    return buf;
+}
+
+function getCharCol(n){
+    let temCol = '',
+    s = '',
+    m = 0
+    while (n > 0) {
+        m = n % 26 + 1
+        s = String.fromCharCode(m + 64) + s
+        n = (n - m) / 26
+    }
+    return s
+}
+
+
+
+
+const RunData = (props) => {
+
+    const [Data, setData] = useState([]);
+    const [startDate, setStartDate] = useState("");
+    const [startTime, setStartTime] = useState("00:00");
+    const [endDate, setEndDate] = useState("");
+    const [endTime, setEndTime] = useState("00:00");
+    const [selectedOption, setSelectedOption] = useState("");
+
+    const [select, setSelect] = useState("");
+    const [SpecList, setSpecList] = useState(require("./Table/csvtojson.json"));
+
+    var HP1 = "";
+    var HP2 = "";
+    var HP3 = "";
+
+    var HP_MAX ="";
+    var HP_MIN ="";
+
+    var PSH20 = "";
+    var PSH30 = "";
+    var PSH40 = "";
+    var PSH50 = "";
+
+    var PSH_MAX = "";
+
+
+    var Check_Note ="";
+    var test =[];
+    var Gap_Max ="";
+    var Gap_Min ="";
+
+
+
+    useEffect(() => {
+        axios.get('http://tw100038334:7000/speclist')
+            .then(function (response) {
+                // handle success
+                    //console.log(response.data);
+                    /*整理從資料庫取出的資料，用json格式儲存*/
+                    setSpecList(response.data);   
+            })
+            .catch(function (error) {
+                // handle error
+                console.log(error);
+                
+            })
+      },[]);
+
+
+    /*匯出excel*/
+    const downloadExl = () => {
+
+        axios.get('http://tw100038334:7000/speclist')
+            .then(function (response) {
+
+                    /*整理從資料庫取出的資料，用json格式儲存*/
+
+                    let datas = response.data//這裡為了不影響專案的資料的使用 採用了lodash中的深克隆方法
+                    let json = datas.map(item=> { //將json資料的鍵名更換成匯出時需要的鍵名
+                        return {
+                            'MODEL' : item.MODEL,
+                            'Main': item.Main,
+                            'Sub': item.Sub,
+                            'MS': item.MS,
+                            'Note': item.Note
+                        }
+                    })
+                    download(json,'SpecList.xlsx')//匯出的檔名 
+            })
+            .catch(function (error) {
+                // handle error
+                console.log(error);
+                
+            }) 
+    }
+
+    /*匯入excel*/
+    const onImportExcel = (files) => {
+        // 獲取上傳的文件對象
+        //const { files } = file.target; // 通過FileReader對象讀取文件
+        const fileReader = new FileReader();
+        //console.log(fileReader);
+        for (let index = 0; index < files.length; index++) {
+            fileReader.name = files[index].name;
+        }
+        fileReader.onload = event => {
+            try {
+                // 判斷上傳檔案的類型 可接受的附檔名
+                const validExts = [".xlsx", ".xls"];
+                const fileExt = event.target.name;
+
+                if (fileExt === null) {
+                    alert("檔案為空值");
+                }
+
+                const fileExtlastof = fileExt.substring(fileExt.lastIndexOf("."));
+                if (validExts.indexOf(fileExtlastof) === -1) {
+                    alert("檔案類型錯誤，可接受的副檔名有：" + validExts.toString());
+                }
+
+                const { result } = event.target; // 以二進制流方式讀取得到整份excel表格對象
+                const workbook = XLSX.read(result, { type: "binary" });
+                let data = []; // 存儲獲取到的數據 // 遍歷每張工作表進行讀取（這裡默認只讀取第一張表）
+                for (const sheet in workbook.Sheets) {
+                    if (workbook.Sheets.hasOwnProperty(sheet)) {
+                        // 利用 sheet_to_json 方法將 excel 轉成 json 數據
+                        data = data.concat(
+                            XLSX.utils.sheet_to_json(workbook.Sheets[sheet])
+                        ); // break; // 如果只取第一張表，就取消註釋這行
+                    }
+                }
+                //console.log(data);
+                setSpecList(data);
+
+                axios.post('http://tw100038334:7000/speclist/update', {
+                    new : data
+
+                })
+                    .then(function (response) {
+
+                        //console.log(response);
+                            
+                    })
+                    .catch(function (error) {
+                        // handle error
+                        console.log(error);
+                        
+                    })
+
+            } catch (e) {
+                // 這裡可以拋出文件類型錯誤不正確的相關提示
+                alert(e);
+                //console.log("文件類型不正確");
+                return;
+            }
+        }; // 以二進制方式打開文件
+        fileReader.readAsArrayBuffer(files[0]);
+    };
+
+
+    /* 讀取SpecList中的Model選項 */
+    for(var i = 0; i <SpecList.length  ; i++){
+        switch (select) {
+            case SpecList[i].MODEL:
+                test = SpecList[i];
+            break;
+            default:
+        }
+    }
+    //console.log(test);
+
+    /* 紀錄選擇Model的選項 */
+    const transferValue = (event) => {
+        setSelect(event.target.value);
+    }
+
+
+
+    /* 開始和結束時間相差天數 */
+    var DateDiff = function (sDate1, sDate2) { // sDate1 是 2016-06-18 格式
+        var oDate1 = new Date(sDate1);
+        var oDate2 = new Date(sDate2);
+        var iDays = parseInt(Math.abs(oDate1 - oDate2) / 1000 / 60 / 60 / 24); // 把相差的毫秒數轉換為天數
+        return iDays;
+    };
+    
+    var GetDateDiff = DateDiff(startDate,endDate); // 轉換為天數 : 1
+
+    /*計算開始天數*/
+    const StartDateTime = (dates, dateStrings) =>{
+    
+        setStartDate(dateStrings);
+
+        
+    }
+
+    /*計算結束天數*/
+    const EndDateTime = (dates, dateString) =>{
+        
+        setEndDate(dateString);
+
+        
+    }
+
+    /*從資料庫取得PSH資訊*/
+    const GetData = (e) => {
+
+        
+        document.getElementById("selectdata2").options[0].selected = true;
+        setSelect(null);
+        var sDay = startDate.split("/");
+        var eDay = endDate.split("/");
+        var sTime = startTime.split(":");
+        var eTime = endTime.split(":");
+        //console.log(startDate+" "+startTime+":00")
+        //console.log(endDate+" "+endTime+":00")
+        var Timesl = parseInt((new Date(sDay[0],sDay[1],sDay[2], sTime[0], sTime[1], 0)  - new Date(eDay[0],eDay[1],eDay[2],eTime[0], eTime[1], 0) ) / 1000 / 60); // 把相差的毫秒數轉換為天數
+        //console.log(new Date(sDay[0],sDay[1],sDay[2], sTime[0], sTime[1], 0));
+        //console.log(new Date(eDay[0],eDay[1],eDay[2],eTime[0], eTime[1], 0));
+
+        for(var i = 0; i < Data.length ; i++){
+            Data.splice(i);
+        }
+        if(selectedOption !== "" && startDate !== "" && endDate !== "" && GetDateDiff < 7 && Timesl <= 0){
+            axios.post('http://tw100038334:7000/getrundata', {
+            LineID: selectedOption,
+            StartTime: startDate+" "+startTime+":00",
+            EndTime: endDate+" "+endTime+":00",
+
+        })
+            .then(function (response) {
+                // handle success
+                
+                //console.log(response.data)
+
+                if(response.data.rows.length === 0){
+                    alert("查無資料");
+                }else{
+
+
+                    let temp = [...Data];
+
+                    /*整理從資料庫取出的資料，用json格式儲存*/
+                    for(var i = 0; i < response.data.rows.length  ; i++){
+                        
+                        var dd = {
+                            RES_CREATE_TIME : response.data.rows[i][0],
+                            SHEET_ID : response.data.rows[i][1],
+                            PRODUCT_CODE : response.data.rows[i][2],
+                            LINE_ID : response.data.rows[i][3],
+                            TOOL_ID : response.data.rows[i][4],
+                            PUMPING_RATE: Math.floor(response.data.rows[i][5]),
+                            CHAMBER : response.data.rows[i][6],
+                            PSH_MAIN : response.data.rows[i][7],
+                            PSH_SUB : response.data.rows[i][8],
+                            PSH_MS : (response.data.rows[i][7]-response.data.rows[i][8]).toFixed(3),
+                            DOSE : Math.round(response.data.rows[i][9]),
+                            GAP : Math.round(response.data.rows[i][10]),
+                            PSH_TOOL_ID : response.data.rows[i][11],
+                            PSH_CREATE_TIME : response.data.rows[i][12],
+                            PROCESS_TOOL1 : response.data.rows[i][13],
+                            PROCESS_TOOL_PROCTIME1 : response.data.rows[i][14],
+                            PROCESS_TOOL2 : response.data.rows[i][15],
+                            PROCESS_TOOL_PROCTIME2 : response.data.rows[i][16],
+                            DOSE_SETTING:"",
+                            Film_thickness:"",
+                            
+                        };
+                        
+                        temp.push(dd);
+                        
+                        if (i === 149) {
+                            break;
+                        }
+                };
+                
+                setData(temp);
+
+                
+
+                const selectGetdata = () => {
+                    
+                    for(var xx = 0; xx < SpecList.length ; xx++){
+                        
+                        if(temp[0].PRODUCT_CODE === SpecList[xx].MODEL){
+
+                            document.getElementById("selectdata2").options[xx+1].selected = true;
+                            setSelect(temp[0].PRODUCT_CODE);
+                        }
+                    }
+                    
+                    
+                  }
+                //console.log("PRODUCT_CODE:"+temp[0].PRODUCT_CODE);
+                selectGetdata();
+                
+                
+                }
+                /*
+                if(select === null){
+                    alert("SpecList選項中無與 "+temp[0].PRODUCT_CODE+" 相同的 model，請更新");
+                }*/
+                
+                
+
+            })
+            .catch(function (error) {
+                // handle error
+                console.log(error);
+                
+            })
+        }else if (selectedOption === "") {
+            alert("請選擇Line ID!");
+        }else if (GetDateDiff >= 7){
+            alert("資料選擇範圍大於7天，請重新選擇");
+        }
+        else if (Timesl > 0){
+            alert("結束時間不可小於開始時間，請重新選擇");
+        }
+        else {
+            alert("請設定時間!");
+        }
+
+        
+        
+    };
+
+    //console.log(Data);
+
+        
+    function HP1_2_3(json,key){
+        let HPCP1 = [];
+        let HPCP2 = [];
+        let HPCP3 = [];
+    
+        for(var i = 0; i < json.length; i++){
+            
+            
+            if(json[i][key] === "1"){
+                var hp1 = Number(json[i].PSH_MS);
+                HPCP1.push(hp1);
+            }else if (json[i][key] === "2") {
+                var hp2 = Number(json[i].PSH_MS);
+                HPCP2.push(hp2);
+                
+            }else if (json[i][key] === "3"){
+                var hp3 = Number(json[i].PSH_MS);
+                HPCP3.push(hp3);
+            }else{
+                console.log("no");
+            }
+           
+
+
+        }
+
+        function ArrayAvg(myArray) {
+            var i = 0, summ = 0, ArrayLen = myArray.length;
+            while (i < ArrayLen) {
+                summ = summ + myArray[i++];
+        }
+            return Math.round((summ / ArrayLen) * 1000) / 1000;
+        }
+
+
+        HP1 = ArrayAvg(HPCP1);
+        HP2= ArrayAvg(HPCP2);
+        HP3 = ArrayAvg(HPCP3);
+
+  
+    }
+    HP1_2_3(Data,'CHAMBER')
+    //console.log(HP1);
+
+    function PSH_20_30_40_50(json,key){
+        let SUN20 = [];
+        let SUN30 = [];
+        let SUN40 = [];
+        let SUN50 = [];
+    
+        for(var i = 0; i < json.length; i++){
+            
+            
+            if(json[i][key] === "FBAPSH20"){
+                var sun20 = Number(json[i].PSH_MS);
+                SUN20.push(sun20);
+            }else if (json[i][key] === "FBAPSH30") {
+                var sun30 = Number(json[i].PSH_MS);
+                SUN30.push(sun30);
+                
+            }else if (json[i][key] === "FBAPSH40"){
+                var sun40 = Number(json[i].PSH_MS);
+                SUN40.push(sun40);
+            }else if (json[i][key] === "FBAPSH50"){
+                var sun50 = Number(json[i].PSH_MS);
+                SUN50.push(sun50);
+            }else{
+                console.log("no");
+            }
+           
+
+
+        }
+
+        function ArrayAvg(myArray) {
+            var i = 0, summ = 0, ArrayLen = myArray.length;
+            while (i < ArrayLen) {
+                summ = summ + myArray[i++];
+        }
+            return Math.round((summ / ArrayLen) * 1000) / 1000;
+        }
+
+
+
+        PSH20 = ArrayAvg(SUN20);
+        PSH30= ArrayAvg(SUN30);
+        PSH40 = ArrayAvg(SUN40);
+        PSH50 = ArrayAvg(SUN50);
+
+  
+    }
+    PSH_20_30_40_50(Data,'PSH_TOOL_ID')
+
+    
+
+    //R_dose_thinkness_correction
+    function R_dose_thinkness_correction(json,key){
+
+        
+        for(var i = 0; i < json.length; i++){
+           
+
+            json[i].dose_thinkness= Math.round(((Number(json[i][key])-Number(test.MS))*100)+Number(json[i].DOSE));
+
+        }
+        
+        
+        
+    }
+    R_dose_thinkness_correction(Data,'PSH_MS');
+
+    /* Gap 最大和最小值 */
+    function Gap_Max_Min(json,key){
+            
+        var Gap = [];
+        
+        /* 將所有M-S列出 */
+        for (var j=0; j < json.length; j++) {
+            
+                var origin = json[j][key];
+                Gap.push(origin);
+            
+        }
+        
+
+        /* 資料排序 - 根據PUMPING_RATE進行排序 */
+        function sortGap(a,b){
+            return b-a
+        }
+        Gap.sort(sortGap);//將Data排序 
+        //console.log(Gap)
+
+        Gap_Max = Gap[0];
+        Gap_Min = Gap[(Gap.length-1)];
+
+     
+        
+    }
+    /*
+    if(test.MS !== undefined){
+        BestMS(CheckTData_ok,'PSH_MS'); //M-S條件最適值
+    }
+    */
+    Gap_Max_Min(Data,'GAP'); //M-S條件最適值
+    
+
+    if(test.Note !== "" && test.Note !== "undefined"){
+        Check_Note = test.Note;
+    }else{
+        Check_Note = "未輸入注意事項";
+    }
+    
+    
+    const getColor_main = (index) => {
+        
+        if(Number(Data[index].PSH_MAIN) < (Number(test.Main)-0.03) || Number(Data[index].PSH_MAIN) > (Number(test.Main)+0.03)) return '#F5C9CA';
+        //if(Number(Data[index].PSH_MAIN) >= (Number(test.Main)-0.03) && Number(Data[index].PSH_MAIN) <= (Number(test.Main)+0.03)) return '#AAD4EC';
+        return '';
+        
+    };
+
+    const getColor_MS = (index) => {
+        
+        if(Number(Data[index].PSH_MS) < (Number(test.MS)-0.05) || Number(Data[index].PSH_MS) > (Number(test.MS)+0.05)) return '#F5C9CA';
+        
+        return '';
+        
+    };
+
+
+    HP_MAX = Math.max(HP1, HP2, HP3);
+    HP_MIN = Math.min(HP1, HP2, HP3);
+
+    const getColor_HP = (index) => {
+        if (HP_MAX === index) return 'red';
+        if (HP_MIN === index) return 'orange';
+        return '';
+    };
+
+    PSH_MAX = Math.max(PSH20, PSH30, PSH40, PSH50);
+    //console.log(Math.max.apply(Math,PSH20, PSH30, PSH40, PSH50));
+    //console.log(Math.max.apply(Math,[PSH20, PSH30, PSH40, PSH50]))
+
+    const getColor_PSH = (index) => {
+        if (PSH_MAX === index) return 'red';
+       
+        return '';
+    };
+
+
+    return (
+        <div id="wrapper">
+            
+            <div id="main" >
+                <div div class="inner">
+                <h1 style={{ color : '#028C6A' }}><b>PSH Run Data 輔 助 決 策 系 統</b></h1>
+                    <div className = 'data-run'>
+        
+                        <img src={Logo} width="10%" height="10%" className = 'logo' alt="logo"/>
+                        <div className = 'picker'>
+                            <Form>
+                                <Form.Group>
+                                    <Form.Label>Line ID :</Form.Label>
+                                    <Form.Select defaultValue={''} type="text" onChange={(e)=>{setSelectedOption(e.target.value)}}>
+                                        <option value="" disabled>Select One</option>
+                                        <option value="FBS10">FBS10</option>
+                                        <option value="FBV10">FBV10</option>
+                                    </Form.Select>
+                                </Form.Group>
+                            </Form>
+                        </div>
+                        <div className = 'datetime'>
+                            <Form.Label >Time :</Form.Label><br></br>
+
+                            <DatePicker 
+                                className = 'ant-class'
+                                size = "large" 
+                                format="YYYY/MM/DD"
+                                defaultOpenValue={moment('0000/00/00', 'YYYY/MM/DD')} 
+                                onChange={StartDateTime}
+                            />
+
+                            <TimePicker
+                                className = 'ant-class'
+                                size = "large" 
+                                format="HH:mm"
+                                showNow={false}
+                                value={moment(startTime, "HH:mm")}
+                                onSelect={(value) => {
+                                    const timeString = moment(value).format("HH:mm");
+                                    setStartTime(timeString);
+                                }} 
+                            />
+
+                            <b className = 'to'> → </b>
+
+                            <DatePicker 
+                                className = 'ant-class'
+                                size = "large"
+                                format="YYYY/MM/DD" 
+                                defaultOpenValue={moment('0000/00/00', 'YYYY/MM/DD')} 
+                                onChange={EndDateTime}
+                            />
+
+                            <TimePicker
+                                className = 'ant-class'
+                                size = "large" 
+                                format="HH:mm"
+                                showNow={false}
+                                value={moment(endTime, "HH:mm")}
+                                onSelect={(value) => {
+                                const timeString = moment(value).format("HH:mm");
+                                setEndTime(timeString);
+                                
+                            }} />
+
+                            
+                            
+                        </div>
+                        <div className = 'getdata'>
+                            <button className="btn-run-get" onClick={GetData} >GetData</button>
+                            
+                        </div>
+                        
+                    </div>
+                                
+                    <div className = 'decision' >
+                        <table className="table table-bordered">
+                        
+                            <tbody >
+                            
+                                <tr>
+                                    <th className="table-light" rowSpan="2">Model</th>
+                                    <td rowSpan="2">
+                                    <Form.Select 
+                                            id="selectdata2"
+                                            defaultValue={''}
+                                            type="text" 
+                                            style={{ width: '90%' }}
+                                            onChange={transferValue}>
+                                                <option value="" disabled>Select One</option>
+                                                {SpecList.map((specList, index)=>{
+                                                return <option key={"specList"+index} value={specList.MODEL}>{specList.MODEL}</option>
+                                            })}
+                                            
+                                        </Form.Select>
+                                    </td>
+                                    <th colSpan="2" className="table-light" >SpecList</th>
+                                    <th className="table-light" >HP1</th>
+                                    <th className="table-light" >HP2</th>
+                                    <th className="table-light" >HP3</th>
+                                    <td rowSpan="2"></td>
+                                    <th className="table-light" >PSH20</th>
+                                    <th className="table-light" >PSH30</th>
+                                    <th className="table-light" >PSH40</th>
+                                    <th className="table-light" >PSH50</th>
+
+                                </tr>
+                                <tr>
+                                    <td colSpan="2"> 
+                                        <button className="btn-run-down" onClick={downloadExl}>下載</button>
+                                        <InputFiles accept=".xlsx, .xls" onChange={onImportExcel}>
+                                            <button className="btn-run-save">匯入</button>
+                                        </InputFiles>
+                                    </td>
+                                    <td style={{ color: getColor_HP(HP1)}}>{HP1}</td>
+                                    <td style={{ color: getColor_HP(HP2)}}>{HP2}</td>
+                                    <td style={{ color: getColor_HP(HP3)}}>{HP3}</td>
+                                    <td style={{ color: getColor_PSH(PSH20)}}>{PSH20}</td>
+                                    <td style={{ color: getColor_PSH(PSH30)}}>{PSH30}</td>
+                                    <td style={{ color: getColor_PSH(PSH40)}}>{PSH40}</td>
+                                    <td style={{ color: getColor_PSH(PSH50)}}>{PSH50}</td>
+
+
+                                
+                                </tr>
+                                <tr>
+                                    <th className="table-light" rowSpan="2">M-S規格</th>
+                                    <td rowSpan="2">{Math.round(test.MS * 100) / 100}</td>
+                                    <th className="table-light">最大Gap</th>
+                                    <th className="table-light">最小Gap</th>
+                                    <th style={atStyle} rowSpan="2">注意事項</th>
+                                    <td style={atStyle} rowSpan="2" colSpan="7">{Check_Note}</td>
+                                
+                                </tr>
+                                <tr>
+
+                                    <td>{Gap_Max}</td>
+                                    <td>{Gap_Min}</td>
+
+
+                                
+                                </tr>
+                            </tbody>
+                    
+                        </table>
+                    </div>
+
+    
+                    <div className = 'check1' >
+                        <table  className="table table-bordered table-hover" >
+                            <thead >
+                                <tr className="table-light">
+                                    <th colSpan="3" >實驗Data</th>
+                                    <th >PSH</th>
+                                    <th>Coater</th>
+                                    <th rowSpan="2">HPCP</th>
+                                    <th>Main</th>
+                                    <th>Sub</th>
+                                    <th >M-S</th>
+                                    <th rowSpan="2">Dose<br />Real</th>
+                                    <th rowSpan="2">Gap<br />Real</th>
+                                    <th rowSpan="2">
+                                        Dose<br />Setting
+                                    </th>
+                                    <th>段差最適值</th>
+                                
+                                </tr>
+                                <tr className="table-light">
+                                    <th>No.</th>
+                                    <th>Glass ID</th>
+                                    <th>ALN time</th>
+                                    <th>SUN</th>
+                                    <th>Pumping rate</th>
+                                    <th>{test.Main}</th>
+                                    <th>{test.Sub}</th>
+                                    <th>{Math.round(test.MS * 100) / 100}</th>
+                                    <th>建議曝光量<br />膜厚補正</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {Data.map((data, index )=>{
+                                    return <tr key={"table"+index}>
+                                        <td>{index+1}</td>
+                                        <td>{data.SHEET_ID}</td>
+                                        <td>{data.PROCESS_TOOL_PROCTIME2}</td>
+                                        <td>{data.PSH_TOOL_ID}</td>
+                                        <td>{data.PUMPING_RATE}</td>
+                                        <td>{data.CHAMBER}</td>
+                                        <td style={{ background: getColor_main(index)}}>{data.PSH_MAIN}</td>
+                                        <td>{data.PSH_SUB}</td>
+                                        <td style={{ background: getColor_MS(index)}}>{data.PSH_MS}</td>
+                                        <td>{data.DOSE}</td>
+                                        <td>{data.GAP}</td>
+                                        <td></td>
+                                        <td>{data.dose_thinkness}</td>
+
+                                    </tr>
+                                    
+                                })}
+                                
+                            </tbody>
+                        
+
+                    
+                        </table>
+                        
+                    </div>
+
+                </div>
+            </div>
+        
+        </div>
+    );
+};
+export default RunData;
+
